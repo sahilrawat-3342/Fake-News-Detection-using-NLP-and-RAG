@@ -1,0 +1,251 @@
+{
+  "metadata": {
+    "created": "2026-04-27T00:00:00.000000",
+    "last_updated": "2026-04-27T22:00:46.772802",
+    "version": "1.0",
+    "description": "TruthLens Performance Metrics - Priority 1: Performance Metrics (Figure 1.4)"
+  },
+  "models": {
+    "truthlens_layer1": {
+      "model_name": "TruthLens Layer 1",
+      "algorithm": "Logistic Regression + TF-IDF",
+      "parameters": {
+        "tfidf_ngram_range": [
+          1,
+          2
+        ],
+        "tfidf_max_df": 0.8,
+        "tfidf_min_df": 3,
+        "lr_solver": "liblinear",
+        "lr_max_iter": 2000,
+        "class_weight": "balanced"
+      },
+      "metrics": {
+        "accuracy": 0.9852538170429336,
+        "precision": 0.9806375442739079,
+        "recall": 0.9925908221797323,
+        "f1_score": 0.9865779783822307,
+        "roc_auc": 0.9985399971530906,
+        "confusion_matrix": {
+          "true_negatives": 3397,
+          "false_positives": 82,
+          "false_negatives": 31,
+          "true_positives": 4153
+        },
+        "specificity": 0.9764300086231675,
+        "sensitivity": 0.9925908221797323
+      },
+      "timestamp": "2026-04-27T21:59:58.027042"
+    },
+    "svm_baseline": {
+      "model_name": "SVM Baseline",
+      "algorithm": "Linear SVM + TF-IDF",
+      "parameters": {
+        "svm_kernel": "linear",
+        "svm_max_iter": 2000,
+        "class_weight": "balanced"
+      },
+      "metrics": {
+        "accuracy": 0.9908651963982774,
+        "precision": 0.9881347887992407,
+        "recall": 0.9952198852772467,
+        "f1_score": 0.9916646820671589,
+        "confusion_matrix": {
+          "true_negatives": 3429,
+          "false_positives": 50,
+          "false_negatives": 20,
+          "true_positives": 4164
+        },
+        "specificity": 0.9856280540385168,
+        "sensitivity": 0.9952198852772467
+      },
+      "timestamp": "2026-04-27T22:00:20.465438"
+    },
+    "naive_bayes_baseline": {
+      "model_name": "Naive Bayes Baseline",
+      "algorithm": "Multinomial Naive Bayes + TF-IDF",
+      "parameters": {
+        "nb_alpha": 1.0
+      },
+      "metrics": {
+        "accuracy": 0.9484536082474226,
+        "precision": 0.9334248455730954,
+        "recall": 0.9751434034416826,
+        "f1_score": 0.9538281706604325,
+        "roc_auc": 0.9865965803012559,
+        "confusion_matrix": {
+          "true_negatives": 3188,
+          "false_positives": 291,
+          "false_negatives": 104,
+          "true_positives": 4080
+        },
+        "specificity": 0.9163552745041679,
+        "sensitivity": 0.9751434034416826
+      },
+      "timestamp": "2026-04-27T22:00:46.685097"
+    }
+  },
+  "comparisons": [
+    {
+      "timestamp": "2026-04-27T00:00:00.000000",
+      "models_compared": [
+        {
+          "key": "truthlens_layer1",
+          "name": "TruthLens Layer 1",
+          "algorithm": "Logistic Regression + TF-IDF"
+        },
+        {
+          "key": "svm_baseline",
+          "name": "SVM Baseline",
+          "algorithm": "Linear SVM + TF-IDF"
+        },
+        {
+          "key": "naive_bayes_baseline",
+          "name": "Naive Bayes Baseline",
+          "algorithm": "Multinomial Naive Bayes + TF-IDF"
+        }
+      ],
+      "winner_by_metric": {
+        "accuracy": {
+          "model": "TruthLens Layer 1",
+          "score": 0.942
+        },
+        "precision": {
+          "model": "TruthLens Layer 1",
+          "score": 0.945
+        },
+        "recall": {
+          "model": "TruthLens Layer 1",
+          "score": 0.938
+        },
+        "f1_score": {
+          "model": "TruthLens Layer 1",
+          "score": 0.938
+        }
+      },
+      "detailed_comparison": [
+        {
+          "model_name": "TruthLens Layer 1",
+          "metrics": {
+            "accuracy": 0.942,
+            "precision": 0.945,
+            "recall": 0.938,
+            "f1_score": 0.938
+          }
+        },
+        {
+          "model_name": "SVM Baseline",
+          "metrics": {
+            "accuracy": 0.918,
+            "precision": 0.922,
+            "recall": 0.912,
+            "f1_score": 0.917
+          }
+        },
+        {
+          "model_name": "Naive Bayes Baseline",
+          "metrics": {
+            "accuracy": 0.889,
+            "precision": 0.895,
+            "recall": 0.881,
+            "f1_score": 0.888
+          }
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-04-27T22:00:46.742858",
+      "models_compared": [
+        {
+          "key": "truthlens_layer1",
+          "name": "TruthLens Layer 1",
+          "algorithm": "Logistic Regression + TF-IDF"
+        },
+        {
+          "key": "svm_baseline",
+          "name": "SVM Baseline",
+          "algorithm": "Linear SVM + TF-IDF"
+        },
+        {
+          "key": "naive_bayes_baseline",
+          "name": "Naive Bayes Baseline",
+          "algorithm": "Multinomial Naive Bayes + TF-IDF"
+        }
+      ],
+      "winner_by_metric": {
+        "accuracy": {
+          "model": "SVM Baseline",
+          "score": 0.9908651963982774
+        },
+        "precision": {
+          "model": "SVM Baseline",
+          "score": 0.9881347887992407
+        },
+        "recall": {
+          "model": "SVM Baseline",
+          "score": 0.9952198852772467
+        },
+        "f1_score": {
+          "model": "SVM Baseline",
+          "score": 0.9916646820671589
+        }
+      },
+      "detailed_comparison": [
+        {
+          "model_name": "TruthLens Layer 1",
+          "metrics": {
+            "accuracy": 0.9852538170429336,
+            "precision": 0.9806375442739079,
+            "recall": 0.9925908221797323,
+            "f1_score": 0.9865779783822307,
+            "roc_auc": 0.9985399971530906,
+            "confusion_matrix": {
+              "true_negatives": 3397,
+              "false_positives": 82,
+              "false_negatives": 31,
+              "true_positives": 4153
+            },
+            "specificity": 0.9764300086231675,
+            "sensitivity": 0.9925908221797323
+          }
+        },
+        {
+          "model_name": "SVM Baseline",
+          "metrics": {
+            "accuracy": 0.9908651963982774,
+            "precision": 0.9881347887992407,
+            "recall": 0.9952198852772467,
+            "f1_score": 0.9916646820671589,
+            "confusion_matrix": {
+              "true_negatives": 3429,
+              "false_positives": 50,
+              "false_negatives": 20,
+              "true_positives": 4164
+            },
+            "specificity": 0.9856280540385168,
+            "sensitivity": 0.9952198852772467
+          }
+        },
+        {
+          "model_name": "Naive Bayes Baseline",
+          "metrics": {
+            "accuracy": 0.9484536082474226,
+            "precision": 0.9334248455730954,
+            "recall": 0.9751434034416826,
+            "f1_score": 0.9538281706604325,
+            "roc_auc": 0.9865965803012559,
+            "confusion_matrix": {
+              "true_negatives": 3188,
+              "false_positives": 291,
+              "false_negatives": 104,
+              "true_positives": 4080
+            },
+            "specificity": 0.9163552745041679,
+            "sensitivity": 0.9751434034416826
+          }
+        }
+      ]
+    }
+  ],
+  "performance_history": []
+}
