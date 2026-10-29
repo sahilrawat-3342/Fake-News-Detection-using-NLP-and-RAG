@@ -1,8 +1,8 @@
 """
-TruthLens REST API and Web Application.
+TruthLens REST API.
 
 Exposes Layer 1 (TF-IDF + Logistic Regression) and Layer 2 (live RAG)
-endpoints, and serves the pre-built React frontend.
+endpoints, and serves the compiled React + Playful Motion frontend bundle.
 Compatible with both local development and Vercel Serverless Functions.
 """
 
@@ -14,10 +14,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # Ensure root directory and current directory are on sys.path
@@ -42,13 +40,37 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def vercel_routing_middleware(request: Request, call_next):
+    """Normalize Vercel Edge rewrites and path resolution."""
+    matched = request.headers.get("x-matched-path")
+    if matched:
+        raw_path = matched.split("?")[0]
+        if raw_path and not raw_path.startswith("/api/index"):
+            request.scope["path"] = raw_path
+
+    cur_path = request.scope.get("path", "")
+    for prefix in ("/api/index.py", "/api/index"):
+        if cur_path == prefix:
+            request.scope["path"] = "/"
+            break
+        elif cur_path.startswith(prefix + "/"):
+            request.scope["path"] = cur_path[len(prefix):]
+            break
+
+    return await call_next(request)
+
+
+# --- LOCATE ASSETS & PERSISTED ARTIFACTS ---
+
 def _find_dir_or_file(rel_path: str) -> Optional[Path]:
-    """Search candidate roots for assets/models across environments."""
+    """Search candidate roots across local workspace and Vercel serverless."""
     candidates = [
         ROOT_DIR / rel_path,
         CURRENT_DIR / rel_path,
         Path.cwd() / rel_path,
         Path("/var/task") / rel_path,
+        Path("/var/task/api") / rel_path,
     ]
     for c in candidates:
         if c.exists():
@@ -56,10 +78,46 @@ def _find_dir_or_file(rel_path: str) -> Optional[Path]:
     return None
 
 
-DIST_DIR = _find_dir_or_file("dist") or _find_dir_or_file("frontend/dist") or (ROOT_DIR / "dist")
+def _find_dist_dir() -> Optional[Path]:
+    for candidate in [
+        CURRENT_DIR / "dist",
+        ROOT_DIR / "dist",
+        CURRENT_DIR.parent / "dist",
+        Path("/var/task/dist"),
+        Path("/var/task/api/dist"),
+        Path.cwd() / "dist",
+        Path.cwd() / "api" / "dist",
+    ]:
+        if candidate.exists() and (candidate / "index.html").exists():
+            return candidate
+    return None
+
+
 MODEL_PATH = _find_dir_or_file("models/final_model.pkl") or (ROOT_DIR / "models" / "final_model.pkl")
 METRICS_PATH = _find_dir_or_file("performance_metrics.json") or (ROOT_DIR / "performance_metrics.json")
 DATA_DIR = _find_dir_or_file("data") or (ROOT_DIR / "data")
+DIST_DIR = _find_dist_dir()
+
+# Cache static frontend files in memory for ~0ms latency and zero disk contention
+_INDEX_HTML: Optional[bytes] = None
+_FAVICON_SVG: Optional[bytes] = None
+_ASSET_CACHE: Dict[str, bytes] = {}
+
+if DIST_DIR:
+    try:
+        idx_file = DIST_DIR / "index.html"
+        if idx_file.exists():
+            _INDEX_HTML = idx_file.read_bytes()
+        fav_file = DIST_DIR / "favicon.svg"
+        if fav_file.exists():
+            _FAVICON_SVG = fav_file.read_bytes()
+        assets_dir = DIST_DIR / "assets"
+        if assets_dir.exists():
+            for item in assets_dir.glob("*"):
+                if item.is_file():
+                    _ASSET_CACHE[item.name] = item.read_bytes()
+    except Exception:
+        pass
 
 _model_lock = threading.Lock()
 _model_cache: Dict[str, Any] = {"model": None, "mtime": None, "error": None}
@@ -138,7 +196,7 @@ def _has_env(*keys: str) -> bool:
     return any(os.getenv(k) for k in keys)
 
 
-# --- API ROUTES (REGISTERED WITH AND WITHOUT /api PREFIX) ---
+# --- API ROUTE HANDLERS ---
 
 def handle_health():
     model = _load_model()
@@ -147,6 +205,7 @@ def handle_health():
         "model_online": model is not None,
         "model_file_present": MODEL_PATH.exists(),
         "model_error": _model_cache.get("error"),
+        "dist_present": _INDEX_HTML is not None,
         "rag_configured": _has_env("GROQ_API_KEY")
         and _has_env("SERPAPI_KEY", "SERPAPI_API_KEY", "GOOGLE_API_KEY"),
         "llm_model": os.getenv("GROQ_MODEL") or "llama-3.1-8b-instant",
@@ -261,11 +320,74 @@ def handle_retrain():
     return {"accuracy": float(acc), "data_count": int(count), "train_time": _runtime_state["train_time"]}
 
 
-# Register both `/api/xyz` and `/xyz`
+# --- STATIC ASSET SERVING ---
+
+def serve_favicon():
+    if _FAVICON_SVG is not None:
+        return Response(
+            content=_FAVICON_SVG,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    raise HTTPException(status_code=404, detail="Favicon not found")
+
+
+def serve_asset(filename: str):
+    content = _ASSET_CACHE.get(filename)
+    if content is None and DIST_DIR:
+        f = DIST_DIR / "assets" / filename
+        if f.exists() and f.is_file():
+            content = f.read_bytes()
+            _ASSET_CACHE[filename] = content
+
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"Asset '{filename}' not found")
+
+    media_type = "application/octet-stream"
+    if filename.endswith(".js"):
+        media_type = "application/javascript"
+    elif filename.endswith(".css"):
+        media_type = "text/css"
+    elif filename.endswith(".svg"):
+        media_type = "image/svg+xml"
+    elif filename.endswith(".woff2"):
+        media_type = "font/woff2"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+def serve_index_html():
+    if _INDEX_HTML is not None:
+        return Response(
+            content=_INDEX_HTML,
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    return Response(
+        content="""<!doctype html><html><head><title>TruthLens</title></head>
+        <body style="font-family:sans-serif;padding:3rem;background:#faf8f5;">
+        <h1>TruthLens API</h1><p>Frontend bundle is initializing. Visit <a href="/docs">/docs</a> for API.</p>
+        </body></html>""",
+        media_type="text/html; charset=utf-8",
+    )
+
+
+def serve_spa_fallback(full_path: str):
+    # Do not swallow API calls or swagger docs
+    if full_path.startswith("api/") or full_path in ("docs", "openapi.json", "redoc"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return serve_index_html()
+
+
+# --- REGISTER ROUTES ---
+
+# API endpoints
 app.get("/api/health")(handle_health)
 app.get("/health")(handle_health)
-app.get("/api")(handle_health)
-app.get("/api/index.py")(handle_health)
 app.get("/api/metrics")(handle_metrics)
 app.get("/metrics")(handle_metrics)
 app.post("/api/predict")(handle_predict)
@@ -275,42 +397,11 @@ app.post("/verify")(handle_verify)
 app.post("/api/retrain")(handle_retrain)
 app.post("/retrain")(handle_retrain)
 
+# Assets & Static
+app.get("/favicon.svg")(serve_favicon)
+app.get("/assets/{filename:path}")(serve_asset)
 
-# --- STATIC ASSET SERVING FOR REACT FRONTEND ---
-
-assets_dir = DIST_DIR / "assets"
-if assets_dir.exists():
-    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-
-@app.get("/favicon.svg")
-def serve_favicon():
-    fav = DIST_DIR / "favicon.svg"
-    if fav.exists():
-        return FileResponse(str(fav), media_type="image/svg+xml")
-    raise HTTPException(status_code=404)
-
-
-@app.get("/")
-def serve_root():
-    index = DIST_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index), media_type="text/html")
-    return HTMLResponse("<h1>TruthLens API</h1><p>Frontend dist not found.</p>")
-
-
-@app.get("/{full_path:path}")
-def serve_spa(full_path: str):
-    # Don't intercept API paths
-    if full_path.startswith("api/") or full_path in ("health", "metrics", "predict", "verify", "retrain"):
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    target = DIST_DIR / full_path
-    if target.is_file():
-        return FileResponse(str(target))
-
-    index = DIST_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index), media_type="text/html")
-
-    raise HTTPException(status_code=404, detail="Not Found")
+# Root & SPA catch-all
+app.get("/")(serve_index_html)
+app.get("/api/index.py")(serve_index_html)
+app.get("/{full_path:path}")(serve_spa_fallback)
