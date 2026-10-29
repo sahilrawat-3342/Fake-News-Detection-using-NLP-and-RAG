@@ -1,0 +1,11 @@
+fastapi>=0.110
+pydantic>=2.6
+pandas
+scikit-learn
+joblib
+langchain-core
+langchain-groq
+python-dotenv
+requests
+beautifulsoup4
+serpapi

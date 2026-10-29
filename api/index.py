@@ -1,9 +1,9 @@
 """
-TruthLens REST API.
+TruthLens REST API and Web Application.
 
 Exposes Layer 1 (TF-IDF + Logistic Regression) and Layer 2 (live RAG)
-endpoints for the React frontend, compatible with both local development
-and Vercel Serverless Functions.
+endpoints, and serves the pre-built React frontend.
+Compatible with both local development and Vercel Serverless Functions.
 """
 
 import json
@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # Ensure root directory and current directory are on sys.path
@@ -33,15 +35,15 @@ app = FastAPI(title="TruthLens API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-def _find_file(rel_path: str) -> Optional[Path]:
-    """Search multiple candidate roots (local workspace, Vercel /var/task)."""
+def _find_dir_or_file(rel_path: str) -> Optional[Path]:
+    """Search candidate roots for assets/models across environments."""
     candidates = [
         ROOT_DIR / rel_path,
         CURRENT_DIR / rel_path,
@@ -54,9 +56,10 @@ def _find_file(rel_path: str) -> Optional[Path]:
     return None
 
 
-MODEL_PATH = _find_file("models/final_model.pkl") or (ROOT_DIR / "models" / "final_model.pkl")
-METRICS_PATH = _find_file("performance_metrics.json") or (ROOT_DIR / "performance_metrics.json")
-DATA_DIR = _find_file("data") or (ROOT_DIR / "data")
+DIST_DIR = _find_dir_or_file("dist") or _find_dir_or_file("frontend/dist") or (ROOT_DIR / "dist")
+MODEL_PATH = _find_dir_or_file("models/final_model.pkl") or (ROOT_DIR / "models" / "final_model.pkl")
+METRICS_PATH = _find_dir_or_file("performance_metrics.json") or (ROOT_DIR / "performance_metrics.json")
+DATA_DIR = _find_dir_or_file("data") or (ROOT_DIR / "data")
 
 _model_lock = threading.Lock()
 _model_cache: Dict[str, Any] = {"model": None, "mtime": None, "error": None}
@@ -135,8 +138,9 @@ def _has_env(*keys: str) -> bool:
     return any(os.getenv(k) for k in keys)
 
 
-@app.get("/api/health")
-def health():
+# --- API ROUTES (REGISTERED WITH AND WITHOUT /api PREFIX) ---
+
+def handle_health():
     model = _load_model()
     return {
         "status": "ok",
@@ -151,8 +155,7 @@ def health():
     }
 
 
-@app.get("/api/metrics")
-def metrics():
+def handle_metrics():
     data = _load_metrics()
     models = data.get("models", {})
     return {
@@ -163,8 +166,7 @@ def metrics():
     }
 
 
-@app.post("/api/predict")
-def predict(payload: TextPayload):
+def handle_predict(payload: TextPayload):
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Input payload is empty.")
@@ -198,15 +200,13 @@ def predict(payload: TextPayload):
     }
 
 
-@app.post("/api/verify")
-def verify(payload: TextPayload):
+def handle_verify(payload: TextPayload):
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Input payload is empty.")
 
     try:
         from src.rag_engine import (
-            RAGConfigurationError,
             build_groq_llm,
             extract_claim_and_query,
             search_web,
@@ -236,8 +236,7 @@ def verify(payload: TextPayload):
         raise HTTPException(status_code=502, detail=f"Deep verification failed: {exc}") from exc
 
 
-@app.post("/api/retrain")
-def retrain():
+def handle_retrain():
     if not ((DATA_DIR / "Fake.csv").exists() and (DATA_DIR / "True.csv").exists()):
         raise HTTPException(
             status_code=501,
@@ -260,3 +259,58 @@ def retrain():
     _runtime_state["train_time"] = f"{elapsed:.2f}s"
     _runtime_state["data_count"] = int(count)
     return {"accuracy": float(acc), "data_count": int(count), "train_time": _runtime_state["train_time"]}
+
+
+# Register both `/api/xyz` and `/xyz`
+app.get("/api/health")(handle_health)
+app.get("/health")(handle_health)
+app.get("/api")(handle_health)
+app.get("/api/index.py")(handle_health)
+app.get("/api/metrics")(handle_metrics)
+app.get("/metrics")(handle_metrics)
+app.post("/api/predict")(handle_predict)
+app.post("/predict")(handle_predict)
+app.post("/api/verify")(handle_verify)
+app.post("/verify")(handle_verify)
+app.post("/api/retrain")(handle_retrain)
+app.post("/retrain")(handle_retrain)
+
+
+# --- STATIC ASSET SERVING FOR REACT FRONTEND ---
+
+assets_dir = DIST_DIR / "assets"
+if assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+
+@app.get("/favicon.svg")
+def serve_favicon():
+    fav = DIST_DIR / "favicon.svg"
+    if fav.exists():
+        return FileResponse(str(fav), media_type="image/svg+xml")
+    raise HTTPException(status_code=404)
+
+
+@app.get("/")
+def serve_root():
+    index = DIST_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index), media_type="text/html")
+    return HTMLResponse("<h1>TruthLens API</h1><p>Frontend dist not found.</p>")
+
+
+@app.get("/{full_path:path}")
+def serve_spa(full_path: str):
+    # Don't intercept API paths
+    if full_path.startswith("api/") or full_path in ("health", "metrics", "predict", "verify", "retrain"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    target = DIST_DIR / full_path
+    if target.is_file():
+        return FileResponse(str(target))
+
+    index = DIST_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index), media_type="text/html")
+
+    raise HTTPException(status_code=404, detail="Not Found")
