@@ -1,0 +1,13 @@
+{
+  "name": "truthlens",
+  "private": true,
+  "version": "3.0.0",
+  "description": "TruthLens — Hybrid ML + Live RAG Fake News Detection (React + FastAPI)",
+  "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:api": "python -m uvicorn api.index:app --reload --port 8000",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "typecheck": "npm --prefix frontend run typecheck"
+  }
+}

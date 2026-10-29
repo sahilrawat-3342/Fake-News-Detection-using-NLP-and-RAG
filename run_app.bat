@@ -1,0 +1,6 @@
+@echo off
+echo Starting TruthLens FastAPI Backend on http://127.0.0.1:8000 ...
+start "TruthLens API" cmd /k "python -m uvicorn api.index:app --reload --port 8000"
+echo Starting TruthLens React Frontend on http://localhost:5173 ...
+cd frontend
+npm run dev

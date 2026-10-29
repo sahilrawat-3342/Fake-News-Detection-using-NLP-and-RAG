@@ -13,7 +13,19 @@ from src.data_loader import DataProcessor
 
 load_dotenv(override=True)
 
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODELS_ENDPOINT = "https://api.groq.com/openai/v1/models"
+GROQ_FALLBACK_MODELS = [
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "qwen/qwen3.8-27b",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+]
+_CACHED_AVAILABLE_GROQ_MODELS: Optional[List[str]] = None
 DEFAULT_MAX_SEARCH_RESULTS = 5
 DEFAULT_FETCH_TIMEOUT = 6
 MAX_PAGE_CHARS = 2200
@@ -120,17 +132,119 @@ def get_serpapi_google_domain() -> str:
     ).strip()
 
 
+def _get_available_groq_models(api_key: str) -> List[str]:
+    """Query Groq's models endpoint once per session to find active models."""
+    global _CACHED_AVAILABLE_GROQ_MODELS
+    if _CACHED_AVAILABLE_GROQ_MODELS is not None:
+        return _CACHED_AVAILABLE_GROQ_MODELS
+
+    try:
+        resp = requests.get(
+            GROQ_MODELS_ENDPOINT,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=4,
+        )
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            models = [
+                str(item.get("id"))
+                for item in data
+                if item.get("id")
+                and not any(
+                    skip in str(item.get("id")).lower()
+                    for skip in ("whisper", "tts", "guard", "safeguard", "playai")
+                )
+            ]
+            if models:
+                _CACHED_AVAILABLE_GROQ_MODELS = models
+                return models
+    except Exception:
+        pass
+
+    return []
+
+
+def _resolve_groq_model(preferred_model: Optional[str] = None) -> str:
+    """Resolve a working Groq chat model, preferring active models on the account."""
+    configured = (_read_secret("GROQ_MODEL") or preferred_model or DEFAULT_GROQ_MODEL).strip()
+    api_key = get_groq_api_key()
+    available = _get_available_groq_models(api_key)
+
+    if not available:
+        return configured
+
+    if configured in available:
+        return configured
+
+    for candidate in GROQ_FALLBACK_MODELS:
+        if candidate in available:
+            return candidate
+
+    return available[0]
+
+
 def build_groq_llm(
     model_name: str = DEFAULT_GROQ_MODEL,
     temperature: float = 0.0,
 ) -> ChatGroq:
     """Create a deterministic Groq-backed chat model for retrieval tasks."""
+    resolved_model = _resolve_groq_model(model_name)
     return ChatGroq(
-        model=model_name,
+        model=resolved_model,
         temperature=temperature,
         groq_api_key=get_groq_api_key(),
         max_retries=2,
     )
+
+
+def _invoke_with_model_fallback(
+    prompt: ChatPromptTemplate,
+    payload: Dict[str, Any],
+    llm: Optional[ChatGroq] = None,
+    model_name: str = DEFAULT_GROQ_MODEL,
+):
+    """Invoke a LangChain prompt+LLM chain and automatically retry with fallback models on 404/decommissioned errors."""
+    active_llm = llm or build_groq_llm(model_name=model_name)
+    try:
+        return (prompt | active_llm).invoke(payload)
+    except Exception as first_exc:
+        err_text = str(first_exc).lower()
+        is_model_err = any(
+            token in err_text
+            for token in (
+                "model_not_found",
+                "does not exist",
+                "decommissioned",
+                "404",
+                "not_found",
+                "model_decommissioned",
+            )
+        )
+        if not is_model_err:
+            raise
+
+        api_key = get_groq_api_key()
+        discovered = _get_available_groq_models(api_key)
+        candidates: List[str] = []
+        for m in GROQ_FALLBACK_MODELS + discovered:
+            if m and m not in candidates and m != getattr(active_llm, "model_name", None):
+                candidates.append(m)
+
+        last_exc = first_exc
+        for fallback_model in candidates:
+            try:
+                fallback_llm = ChatGroq(
+                    model=fallback_model,
+                    temperature=0.0,
+                    groq_api_key=api_key,
+                    max_retries=1,
+                )
+                return (prompt | fallback_llm).invoke(payload)
+            except Exception as retry_exc:
+                last_exc = retry_exc
+                continue
+
+        raise last_exc
 
 
 def _fallback_query(cleaned_text: str, max_terms: int = 12) -> str:
@@ -267,13 +381,14 @@ def extract_claim_and_query(
         ]
     )
 
-    llm = llm or build_groq_llm(model_name=model_name)
-    chain = prompt | llm
-    response = chain.invoke(
-        {
+    response = _invoke_with_model_fallback(
+        prompt=prompt,
+        payload={
             "raw_text": raw_text[:4000],
             "cleaned_text": cleaned_text[:2500],
-        }
+        },
+        llm=llm,
+        model_name=model_name,
     )
 
     payload = _safe_json_loads(response.content) or {}
@@ -666,14 +781,15 @@ def verify_claim_with_context(
         ]
     )
 
-    llm = llm or build_groq_llm(model_name=model_name)
-    chain = prompt | llm
-    response = chain.invoke(
-        {
+    response = _invoke_with_model_fallback(
+        prompt=prompt,
+        payload={
             "claim_text": claim_text[:2000],
             "raw_text": (raw_text or claim_text)[:2500],
             "search_context": _format_search_context(search_results)[:MAX_CONTEXT_CHARS],
-        }
+        },
+        llm=llm,
+        model_name=model_name,
     )
 
     parsed = _parse_verification_response(response.content)

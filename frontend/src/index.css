@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/*
+ * TruthLens design tokens — Playful Motion system
+ * (@reactbits-pro/skill-playful-motion): warm newsprint canvas, ink text,
+ * oversized rounded geometry, pill tokens, and saturated but limited accents.
+ */
+@theme {
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-paper: #fff7ec;
+  --color-paper-deep: #fbead3;
+  --color-ink: #1a1714;
+  --color-ink-soft: #4a433c;
+  --color-ink-mute: #8a8178;
+  --color-line: #eadbc6;
+
+  --color-tomato: #ff5a36;
+  --color-tomato-deep: #e0431f;
+  --color-mint: #19c48a;
+  --color-mint-soft: #d4f6e7;
+  --color-butter: #ffcf3f;
+  --color-butter-soft: #fff1c2;
+  --color-berry: #ff3d6e;
+  --color-berry-soft: #ffe0e8;
+  --color-cobalt: #3d5afe;
+  --color-cobalt-soft: #e1e6ff;
+
+  --radius-blob: 2.5rem;
+  --radius-card: 2rem;
+  --radius-chunk: 1.5rem;
+
+  --shadow-pop: 0 2px 0 0 var(--color-ink);
+  --shadow-pop-lg: 0 6px 0 0 var(--color-ink);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection {
+    background: var(--color-butter);
+    color: var(--color-ink);
+  }
+  textarea::placeholder {
+    color: var(--color-ink-mute);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
