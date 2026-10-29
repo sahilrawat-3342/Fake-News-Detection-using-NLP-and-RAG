@@ -1,9 +1,10 @@
-streamlit
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
 pandas
 scikit-learn
-nltk
 joblib
-langchain
+langchain-core
 langchain-groq
 python-dotenv
 requests
